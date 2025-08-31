@@ -25,7 +25,7 @@ from formatting import fmt_inr_lakh_style, to_ist, format_refresh_time
 # Page configuration
 st.set_page_config(
     page_title="Treasury Dashboard",
-    page_icon="💰",
+    page_icon="🪙",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -515,41 +515,48 @@ def tab_policy_limits():
     else:
         st.warning("Policy data unavailable")
 
-def add_logo(logo_path: str, height_px: int = 42, link: str | None = None, debug: bool = False):
-    """
-    Pins a logo to the top-left of the app and adds top padding so content doesn't overlap it.
-    logo_path: absolute or relative path to the image file
-    """
+import base64
+from pathlib import Path
+import streamlit as st
+
+def add_logo(
+    logo_path: str,
+    height_px: int = 42,
+    pad_extra_px: int = 6,              # small cushion above the title
+    remove_st_header_gap: bool = True,  # trims Streamlit's built-in top gap
+):
     p = Path(logo_path)
     if not p.exists():
-        if debug:
-            import streamlit as st
-            st.warning(f"Logo not found at: {p.resolve()}")
+        st.warning(f"Logo not found at: {p.resolve()}")
         return
 
     b64 = base64.b64encode(p.read_bytes()).decode()
-    link_open = f'<a href="{link}" target="_blank">' if link else ""
-    link_close = "</a>" if link else ""
+    header_gap_css = (
+        """
+        /* Trim Streamlit's default header spacer */
+        .stApp [data-testid="stHeader"] { height: 0px; }
+        .stApp [data-testid="stToolbar"] { right: 1rem; } /* keep toolbar clickable */
+        """
+        if remove_st_header_gap else ""
+    )
 
-    import streamlit as st
     st.markdown(
         f"""
         <style>
             .app-logo {{
                 position: fixed;
-                top: 12px;
+                top: 50px;
                 left: 12px;
                 height: {height_px}px;
                 z-index: 1000;
             }}
-            /* Add enough padding so pinned logo doesn't overlap content */
+            /* Only add the space we truly need for the pinned logo */
             .block-container {{
-                padding-top: calc({height_px}px + 28px);
+                padding-top: {height_px + pad_extra_px}px !important;
             }}
+            {header_gap_css}
         </style>
-        {link_open}
         <img class="app-logo" src="data:image/png;base64,{b64}" alt="Logo">
-        {link_close}
         """,
         unsafe_allow_html=True,
     )
@@ -557,7 +564,7 @@ def add_logo(logo_path: str, height_px: int = 42, link: str | None = None, debug
 def main():
     """Main dashboard application with tabs."""
     base_dir = Path(__file__).parent
-    add_logo(base_dir / "logo.png", height_px=80, debug=True)
+    add_logo(base_dir / "logo.png", height_px=80, pad_extra_px=-20, remove_st_header_gap=True)
     st.title("💰 Treasury Dashboard")
     
     # ===== GLOBAL HEADER (outside tabs to avoid duplication) =====

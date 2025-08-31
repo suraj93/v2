@@ -1,0 +1,13 @@
+counterparty_id,name,type
+CUST1,Acme Retailers,customer
+CUST2,Nimbus Foods,customer
+CUST3,Sunrise Traders,customer
+CUST4,Blueberry Mart,customer
+CUST5,Riverdale Superstores,customer
+CUST6,Evergreen Grocers,customer
+VEND1,Bright Logistics,vendor
+VEND2,Delta Packaging,vendor
+VEND3,Northwind Textiles,vendor
+VEND4,Aurora Supplies,vendor
+VEND5,GreenLeaf Ingredients,vendor
+VEND6,Zenith Warehousing,vendor

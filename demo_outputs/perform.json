@@ -1,0 +1,12 @@
+{
+  "date": "2025-08-30",
+  "deployable_value": 10060590.19,
+  "current_balance": 15000000,
+  "must_keep_value": 5284459.85,
+  "safety_buffers": 5284459.85,
+  "description": "Deployable value: INR10.1M from current balance INR15.0M, expected AR INR0.9M, AP INR1.2M, buffer INR5.3M.\nLimited surplus available due to high outflow requirements and conservative buffer maintenance.",
+  "deploy_instrument": null,
+  "deploy_issuer": null,
+  "max_tenor": null,
+  "approval_needed": true
+}

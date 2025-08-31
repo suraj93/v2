@@ -1,0 +1,10 @@
+{
+  "timezone": "Asia/Kolkata",
+  "business_days": ["Mon","Tue","Wed","Thu","Fri"],
+  "cutoff_hour_ist": 14,
+  "market_cutoffs": {
+    "Liquid_Fund_Overnight": { "order_cutoff_hour_ist": 14, "settlement_t_plus_days": 0 }
+  },
+  "holidays_2025": ["2025-01-26","2025-08-15","2025-10-02"]
+}
+

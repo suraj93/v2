@@ -1,0 +1,8 @@
+Collecting plotly
+  Downloading plotly-6.3.0-py3-none-any.whl.metadata (8.5 kB)
+Requirement already satisfied: narwhals>=1.15.1 in d:\coding\cashflow-detect\v1\.venv\lib\site-packages (from plotly) (2.2.0)
+Requirement already satisfied: packaging in d:\coding\cashflow-detect\v1\.venv\lib\site-packages (from plotly) (25.0)
+Downloading plotly-6.3.0-py3-none-any.whl (9.8 MB)
+   ---------------------------------------- 9.8/9.8 MB 21.0 MB/s  0:00:00
+Installing collected packages: plotly
+Successfully installed plotly-6.3.0

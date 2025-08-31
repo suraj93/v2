@@ -1,0 +1,4 @@
+instrument_name,issuer,amount_rupees,expected_annual_rate_bps,accrual_basis_days
+Liquid Fund - Direct Plan - Growth,HDFC Liquid FUnd,6000000,630,365
+Liquid Fund - Direct Plan - Growth,ICICI Liquid Fund,5000000,645,365
+Overnight Fund - Direct Plan - Growth,SBI LIquid Fund,1000000,610,365

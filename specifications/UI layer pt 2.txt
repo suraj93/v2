@@ -1,0 +1,146 @@
+---
+
+# Phase 2 — Spec: Investments & Interest (+ optional charts & policy tab)
+
+## Objective
+
+Extend the Streamlit app to display **investments and interest** using your **existing SQLite DB + SQL views**:
+
+* **Current Investment Balance** (sum of holdings)
+* **Total Interest Earned (YTD)** (use **existing SQL view** in your codebase)
+* **Average Investment Balance (Trailing 30d)** (from `interest_accruals`)
+* Tables for **Holdings** and **Interest Attribution**
+* **Optional** charts: Forward 30-day AP vs AR; last 60 days interest
+* **Policy Limits** tab (read-only with dummy “Edit” buttons)
+
+## Scope (Phase 2 additions)
+
+* **KPI cards**: Current Investment Balance · Total Interest (YTD) · Avg Investment Balance (30d)
+* **Holdings table** (instrument, issuer, amount, expected rate, daily interest, updated\_at)
+* **Attribution table** (date range selector; default YTD)
+* **Optional** charts (simple)
+* **Policy Limits** tab: show values; “Edit” buttons present but disabled
+
+## Data Sources (reuse; do not re-implement)
+
+* **SQLite `treasury.db`** with:
+
+  * `holdings(id, instrument_name, issuer, amount_paise, expected_annual_rate_bps, accrual_basis_days, daily_interest_paise, updated_at)`
+  * `interest_accruals(id, as_of_date, instrument_name, issuer, opening_amount_paise, expected_annual_rate_bps, accrual_basis_days, accrued_interest_paise, method, created_at)`
+  * `policy_limits(id=1, min_operating_cash_paise, gst_buffer_paise, payroll_buffer_paise, vendor_tier_a_floor_paise, vendor_tier_b_floor_paise, updated_at)`
+* **Total Interest Earned**: **use the existing SQL view** already implemented. If the exact view name isn’t easily locatable, fall back to:
+
+  ```sql
+  SELECT COALESCE(SUM(accrued_interest_paise),0) AS ytd_paise
+  FROM interest_accruals
+  WHERE strftime('%Y', as_of_date) = strftime('%Y','now');
+  ```
+* **AP/AR 30-day Forecast JSON**: **use your existing function/endpoint** (already available).
+
+## Queries (Phase 2)
+
+* **Current Investment Balance**
+
+  ```sql
+  SELECT COALESCE(SUM(amount_paise),0) AS total_paise FROM holdings;
+  ```
+* **Avg Investment Balance (trailing 30d)**
+
+  ```sql
+  SELECT AVG(opening_amount_paise) AS avg30_paise
+  FROM interest_accruals
+  WHERE as_of_date >= date('now','-30 day');
+  ```
+* **Holdings table**
+
+  ```sql
+  SELECT instrument_name, issuer, amount_paise, expected_annual_rate_bps,
+         daily_interest_paise, updated_at
+  FROM holdings
+  ORDER BY issuer, instrument_name;
+  ```
+* **Attribution (date range; default YTD)**
+
+  ```sql
+  SELECT instrument_name, issuer,
+         SUM(accrued_interest_paise) AS interest_paise,
+         AVG(opening_amount_paise)   AS avg_opening_paise,
+         ROUND(
+           CAST(SUM(expected_annual_rate_bps * opening_amount_paise) AS REAL)
+           / NULLIF(SUM(opening_amount_paise),0)
+         ) AS avg_rate_bps,
+         COUNT(*) AS days
+  FROM interest_accruals
+  WHERE as_of_date BETWEEN :start AND :end
+  GROUP BY instrument_name, issuer
+  ORDER BY interest_paise DESC;
+  ```
+* **Daily interest series (last 60 days)** *(optional chart)*
+
+  ```sql
+  SELECT as_of_date, SUM(accrued_interest_paise) AS daily_paise
+  FROM interest_accruals
+  WHERE as_of_date >= date('now','-60 day')
+  GROUP BY as_of_date
+  ORDER BY as_of_date;
+  ```
+
+## Data Access (new adapters)
+
+```python
+# data_access.py (Phase 2 additions)
+def load_holdings_df(sqlite_path="treasury.db") -> DataFrame: ...
+def get_investment_totals(sqlite_path="treasury.db") -> dict:
+    """return {
+        'current_investment_paise': int,
+        'total_interest_ytd_paise': int,   # from existing SQL view if available
+        'avg_30d_opening_paise': int
+    }"""
+def load_attribution(start:str, end:str, sqlite_path="treasury.db") -> DataFrame: ...
+def load_interest_daily_series(days=60, sqlite_path="treasury.db") -> DataFrame: ...
+def load_policy_limits(sqlite_path="treasury.db") -> dict: ...
+def get_forecast_ap_ar_30d() -> list[dict]:  # use existing implementation
+    ...
+```
+
+## UI Additions
+
+* **KPI strip**: append 3 cards (Investment Balance, Total Interest YTD, Avg Inv Balance 30d)
+* **Section: Investments & Interest**
+
+  * Holdings table (sortable)
+  * Attribution table with a date range picker (default: YTD)
+* **Optional charts**
+
+  * Line chart: Forward 30-day AP vs AR (uses existing JSON)
+  * Bar chart: Daily interest (last 60 days)
+* **Bottom: Policy Limits (read-only)**
+
+  * Show Minimum Balance, GST Buffer, Payroll Buffer, Vendor Tier-A/B Floors (₹ Lakhs/Crore)
+  * “Edit” buttons present but disabled (tooltip: “Coming soon”)
+
+## Formatting & UX (carry over from Phase 1)
+
+* **IST** everywhere
+* **₹ Lakhs/Crore** formatting with exact value on hover
+* Auto-refresh every 60s
+* Hide optional charts if data unavailable
+
+## Acceptance Criteria (Phase 2)
+
+* The 3 new KPI cards render and match DB/view values.
+* Holdings and Attribution tables load in <100ms for ≤100 rows.
+* YTD interest aligns with the **existing SQL view** (or fallback sum).
+* Optional charts render correctly when data present; hidden otherwise.
+* Policy Limits tab shows values with disabled Edit buttons.
+
+## Run (same as Phase 1)
+
+```bash
+pip install -r app/requirements.txt
+streamlit run app/dashboard.py
+```
+
+---
+
+If you want, I can now generate the **starter `dashboard.py` + adapters** split by Phase 1 and Phase 2 sections so you can implement them incrementally.

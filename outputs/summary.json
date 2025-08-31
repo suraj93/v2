@@ -1,0 +1,87 @@
+{
+  "balance": 4800000.0,
+  "expected_inflows": 862625.11,
+  "expected_outflows": 1203878.13,
+  "total_open_receivables": 1168701.78,
+  "total_open_payables": 935135.58,
+  "ar_probability_effect": 306076.67,
+  "ap_probability_effect": 29860.29,
+  "net_probability_effect": 276216.38,
+  "net_expected_flow": -341253.02,
+  "must_keep": 4074265.94,
+  "deployable": 1571106.67,
+  "deployable_attribution": {
+    "cash_flows": {
+      "current_balance": 4800000.0,
+      "raw_ar_receivables": 1168701.78,
+      "raw_ap_payables": 1233738.42,
+      "raw_net_position": -65036.64,
+      "expected_inflows": 862625.11,
+      "expected_outflows": 1203878.13,
+      "net_expected_flow": -341253.02,
+      "ar_probability_effect": 306076.67,
+      "ap_probability_effect": 29860.29,
+      "net_probability_effect": 276216.38
+    },
+    "safety_buffers": {
+      "total_must_keep": 4074265.94,
+      "base_buffers": {
+        "operating_cash": 1000000,
+        "payroll_buffer": 400000,
+        "tax_buffer": 200000,
+        "subtotal": 1600000
+      },
+      "vendor_buffers": {
+        "critical_vendors": 6,
+        "regular_vendors": 5,
+        "critical_buffer": 900000,
+        "regular_buffer": 250000,
+        "subtotal": 1150000
+      },
+      "shock_buffer": {
+        "multiplier": 1.1,
+        "expected_outflows": 1203878.13,
+        "buffer_amount": 1324265.94
+      }
+    },
+    "deployable_calculation": {
+      "available_balance": 4800000.0,
+      "recognition_ratio": 0.98,
+      "recognized_inflows": 845372.61,
+      "total_available": 5645372.61,
+      "less_must_keep": 4074265.94,
+      "deployable_amount": 1571106.67
+    }
+  },
+  "order": {
+    "proposed": 1571106.67,
+    "instrument": "Liquid_Fund_Overnight",
+    "issuer": "HDFC Liquid Fund",
+    "needs_maker_checker": true
+  },
+  "reasons": [
+    "FIXED_BUFFERS",
+    "OUTFLOW_SHOCK",
+    "CONSERVATIVE_INFLOW",
+    "WL_OK",
+    "MAKER_CHECKER"
+  ],
+  "horizon_days": 7,
+  "as_of_date": "2025-08-30",
+  "execution_state": {
+    "status": "pass_through",
+    "message": "Order processing deferred - performance output generated",
+    "perform_output": {
+      "date": "2025-08-31",
+      "deployable_value": 1571106.67,
+      "current_balance": 4800000.0,
+      "must_keep_value": 4074265.94,
+      "safety_buffers": 4074265.94,
+      "description": "Deployable value: INR1.6M from current balance INR4.8M, expected AR INR0.9M, AP INR1.2M, buffer INR4.1M.\nLimited surplus available due to high outflow requirements and conservative buffer maintenance.",
+      "deploy_instrument": "Liquid_Fund_Overnight",
+      "deploy_issuer": "HDFC Liquid Fund",
+      "max_tenor": 1,
+      "approval_needed": true
+    }
+  }
+}

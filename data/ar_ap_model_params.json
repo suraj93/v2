@@ -1,0 +1,17 @@
+{
+  "ar_collection_probabilities": {
+    "overdue": 0.85,
+    "within_7_days": 0.70,
+    "within_14_days": 0.50,
+    "beyond_14_days": 0.30
+  },
+  "ap_payment_probabilities": {
+    "overdue": 1.00,
+    "within_horizon": 1.00,
+    "beyond_horizon_within_provision": 0.90,
+    "beyond_provision": 0.00
+  },
+  "ap_certainty_horizon": 7,
+  "model_version": "1.2",
+  "description": "AR collection probability model and four-tier AP payment probability model"
+}

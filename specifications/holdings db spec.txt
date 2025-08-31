@@ -1,0 +1,213 @@
+# Technical Spec — Combined “Holdings + Interest Accrual” (SQLite MVP)
+
+## 0) Objective
+
+Provide a tiny, local database that supports:
+
+1. A **Holdings view** of withdrawable corpus per instrument/issuer (with expected rate).
+2. **Interest earned views**: daily series and YTD totals, with attribution by instrument/issuer (balance used, rate, days).
+
+> Keep it minimal: two tables, deterministic daily accruals, a few getters/updates. No NAV/units, no audit logs.
+
+---
+
+## 1) Storage & Precision
+
+* Engine: **SQLite 3** (single file, e.g., `treasury.db`)
+* Journal mode: `WAL`
+* Money: **paise** (INTEGER)
+* Rates: **basis points** (bps, INTEGER)
+* Accrual basis: **365** (configurable per row)
+
+---
+
+## 2) Tables
+
+### 2.1 `holdings` — current withdrawable corpus
+
+One row per **(instrument\_name, issuer)**.
+
+| Column                                | Type                         | Notes                                     |
+| ------------------------------------- | ---------------------------- | ----------------------------------------- |
+| id                                    | INTEGER PK AUTOINCREMENT     |                                           |
+| instrument\_name                      | TEXT NOT NULL                | e.g., “Overnight Fund – Direct (Growth)”  |
+| issuer                                | TEXT NOT NULL                | AMC/asset manager name                    |
+| amount\_paise                         | INTEGER NOT NULL             | withdrawable corpus; **≥ 0**              |
+| currency                              | TEXT NOT NULL DEFAULT 'INR'  |                                           |
+| expected\_annual\_rate\_bps           | INTEGER NOT NULL DEFAULT 0   | e.g., 630 = 6.30%                         |
+| accrual\_basis\_days                  | INTEGER NOT NULL DEFAULT 365 | 365 or 360                                |
+| daily\_interest\_paise                | INTEGER NOT NULL DEFAULT 0   | snapshot: amount × rate / (10000 × basis) |
+| updated\_at                           | TEXT NOT NULL (UTC ISO8601)  | auto on insert/update                     |
+| **UNIQUE (instrument\_name, issuer)** |                              |                                           |
+
+**Trigger logic** keeps `daily_interest_paise` in sync when amount/rate/basis change.
+
+---
+
+### 2.2 `interest_accruals` — daily accrual rows (for attribution + totals)
+
+One row per **(date, instrument\_name, issuer)**.
+
+| Column                                              | Type                          | Notes                                     |
+| --------------------------------------------------- | ----------------------------- | ----------------------------------------- |
+| id                                                  | INTEGER PK AUTOINCREMENT      |                                           |
+| as\_of\_date                                        | TEXT NOT NULL                 | `'YYYY-MM-DD'` UTC                        |
+| instrument\_name                                    | TEXT NOT NULL                 |                                           |
+| issuer                                              | TEXT NOT NULL                 |                                           |
+| opening\_amount\_paise                              | INTEGER NOT NULL              | start-of-day corpus used for accrual      |
+| expected\_annual\_rate\_bps                         | INTEGER NOT NULL              | rate used that day                        |
+| accrual\_basis\_days                                | INTEGER NOT NULL DEFAULT 365  |                                           |
+| accrued\_interest\_paise                            | INTEGER NOT NULL              | `floor(opening × rate / (10000 × basis))` |
+| method                                              | TEXT NOT NULL DEFAULT 'model' | leave `'model'` in MVP                    |
+| created\_at                                         | TEXT NOT NULL                 | auto timestamp                            |
+| **UNIQUE (as\_of\_date, instrument\_name, issuer)** |                               | idempotency key                           |
+
+---
+
+## 3) Authoritative DDL (copy-paste)
+
+```sql
+CREATE TABLE IF NOT EXISTS holdings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  instrument_name TEXT NOT NULL,
+  issuer TEXT NOT NULL,
+  amount_paise INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  expected_annual_rate_bps INTEGER NOT NULL DEFAULT 0,
+  accrual_basis_days INTEGER NOT NULL DEFAULT 365,
+  daily_interest_paise INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE (instrument_name, issuer)
+);
+CREATE INDEX IF NOT EXISTS idx_holdings_issuer ON holdings(issuer);
+
+CREATE TRIGGER IF NOT EXISTS trg_holdings_recalc_interest
+AFTER INSERT ON holdings
+BEGIN
+  UPDATE holdings
+    SET daily_interest_paise =
+      (amount_paise * expected_annual_rate_bps) / (10000 * accrual_basis_days)
+  WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_holdings_recalc_interest_update
+AFTER UPDATE OF amount_paise, expected_annual_rate_bps, accrual_basis_days ON holdings
+BEGIN
+  UPDATE holdings
+    SET daily_interest_paise =
+      (amount_paise * expected_annual_rate_bps) / (10000 * accrual_basis_days),
+      updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  WHERE id = NEW.id;
+END;
+
+CREATE TABLE IF NOT EXISTS interest_accruals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  as_of_date TEXT NOT NULL,
+  instrument_name TEXT NOT NULL,
+  issuer TEXT NOT NULL,
+  opening_amount_paise INTEGER NOT NULL,
+  expected_annual_rate_bps INTEGER NOT NULL,
+  accrual_basis_days INTEGER NOT NULL DEFAULT 365,
+  accrued_interest_paise INTEGER NOT NULL,
+  method TEXT NOT NULL DEFAULT 'model',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE (as_of_date, instrument_name, issuer)
+);
+CREATE INDEX IF NOT EXISTS idx_accruals_date ON interest_accruals(as_of_date);
+CREATE INDEX IF NOT EXISTS idx_accruals_instr ON interest_accruals(instrument_name, issuer);
+```
+
+---
+
+## 4) Core Logic
+
+### 4.1 Daily accrual posting (idempotent job)
+
+* **When:** once per business day (pick UTC midnight or IST EOD; be consistent).
+* **How:** For each row in `holdings`:
+
+  1. `opening_amount_paise ← holdings.amount_paise` at posting time
+  2. `accrued_interest_paise ← floor(opening × rate_bps / (10000 × basis))`
+  3. `INSERT OR IGNORE` into `interest_accruals` using the UNIQUE key
+* Re-running for the same date won’t create duplicates.
+
+### 4.2 Totals & attribution (queries)
+
+* **Daily total interest:** sum of `accrued_interest_paise` grouped by `as_of_date`.
+* **YTD total:** sum of `accrued_interest_paise` where `strftime('%Y', as_of_date)=:year`.
+* **Attribution (any date range):** group by `(instrument_name, issuer)` and return:
+
+  * `sum_interest_paise`
+  * `avg_opening_balance_paise = AVG(opening_amount_paise)`
+  * `avg_rate_bps` (e.g., weighted by opening balance):
+    `ROUND(SUM(expected_annual_rate_bps * opening_amount_paise) / NULLIF(SUM(opening_amount_paise),0))`
+  * `days_count = COUNT(*)`
+
+*(Holding period is approximated by `days_count`.)*
+
+---
+
+## 5) Minimal Interfaces (function contracts)
+
+* **`init_db(db_path="treasury.db")`** → create file, apply DDL, set WAL.
+* **`seed_holdings(rows)`** → idempotent inserts; each row has:
+  `{instrument_name, issuer, amount_rupees|amount_paise, expected_annual_rate_bps, accrual_basis_days}`
+* **`list_holdings()`** → all rows with rupee convenience fields.
+* **`get_holdings_totals()`** → `{total_corpus_rupees, total_daily_interest_rupees}` (from `holdings`).
+* **`apply_allocation(instrument, issuer, amount_rupees)`** → increase `amount_paise` (insert-or-update).
+* **`apply_redemption(amount_rupees, selection="most_recent_first")`** → decrement across rows; fail atomically if insufficient corpus.
+* **`update_rate(instrument, issuer, new_rate_bps)`** → update and auto-recalc snapshot interest.
+* **`post_daily_accrual(as_of_date=today)`** → create `interest_accruals` rows (idempotent).
+* **`get_daily_interest_series(start_date, end_date)`** → `[ {date, accrued_rupees} ]`
+* **`get_ytd_totals(year)`** → `{ytd_accrued_rupees}`
+* **`get_attribution(start_date, end_date)`** → `[ {instrument, issuer, interest_rupees, avg_opening_rupees, avg_rate_bps, days} ]`
+
+All write ops run in a transaction; reject negatives and over-redemptions.
+
+---
+
+## 6) Acceptance Criteria
+
+* Seeding creates rows once; re-seeding is a no-op (no duplicates).
+* `holdings.daily_interest_paise` auto-updates on amount/rate/basis change.
+* `post_daily_accrual()` for a date is idempotent (0 duplicates on second run).
+* Daily, YTD, and attribution queries return numerically consistent results.
+* Basic perf: list/totals < 50 ms; accrual post for ≤100 holdings < 100 ms.
+
+---
+
+## 7) Example Seed Payload (JSON)
+
+```json
+{
+  "rows": [
+    {"instrument_name":"Overnight Fund - Direct Plan - Growth","issuer":"Acme Mutual Fund","amount_rupees":6000000,"expected_annual_rate_bps":630},
+    {"instrument_name":"Liquid Fund - Direct Plan - Growth","issuer":"Bravo Mutual Fund","amount_rupees":2500000,"expected_annual_rate_bps":645},
+    {"instrument_name":"Treasury Advantage - Direct - Growth","issuer":"Cyan Asset Managers","amount_rupees":1500000,"expected_annual_rate_bps":610}
+  ]
+}
+```
+
+---
+
+# Simple English Summary (How it works)
+
+* We keep **one small SQLite file** with **two tables**:
+
+  * **Holdings** says: “How much money is parked in each liquid fund today, and at what expected annual rate?” It also stores a **per-day interest snapshot** based on those numbers.
+  * **Interest Accruals** adds **one row per instrument per day** that records: the **opening balance**, the **rate used**, and the **interest accrued for that day**.
+
+* Each day, a tiny job runs:
+
+  1. Reads today’s balances from **Holdings**.
+  2. Calculates the day’s interest for each instrument using a simple formula.
+  3. Writes a **single dated row** into **Interest Accruals** (idempotent—won’t double post).
+
+* From there, you can:
+
+  * Show a **daily interest chart** (sum of the accrual rows by date).
+  * Show **YTD interest** (sum rows for the current year).
+  * Do **attribution**: group rows by instrument/issuer to see **which funds earned how much**, along with the **average balance**, **average rate**, and **how many days** contributed (a simple holding-period proxy).
+
+* You can **add money** or **redeem** via small update functions that change the holdings table; the daily job will pick up the new balance the next day.
+
+That’s it—just two simple tables and a daily write give you a clean holdings view, accurate daily/YTD interest, and defensible attribution without extra bells and whistles.

@@ -1,0 +1,350 @@
+Core-Loop Treasury Auto-Sweep — Technical Specification (Buildable by Claude)
+Scope: Implement an offline, explainable auto-sweep engine using local CSV/JSON inputs that produces a human-readable EOD summary and an optional simulated order.
+Loop: Parse → Predict → Prescribe → Perform → Present
+Language: Python 3.12 (single-process, file-based; no external services required)
+________________________________________
+1) Goals & Non-Goals
+1.1 Goals
+•	Deterministic computation of short-horizon cash needs and safe deployable surplus.
+•	Single-bucket allocation proposal (e.g., “Liquid_Fund_Overnight”) with guardrails.
+•	Clear reason codes for every decision (explainability).
+•	CLI entrypoint that reads CSV/JSON and writes summary.json + EOD_Summary.md.
+•	Optional simulated execution writing order_{uuid}.json.
+1.2 Non-Goals
+•	Live connectors (bank/ERP/venues), production infra, portfolio optimization, advanced ML, SOC-grade audit.
+________________________________________
+2) Runtime, Dependencies, Commands
+2.1 Environment
+•	Python 3.12
+•	OS-agnostic; reads/writes local files.
+2.2 Dependencies
+•	Required: pandas, pytest
+•	Optional: pydantic (typed models), streamlit (demo UI), rich (pretty logs)
+2.3 Standard commands
+# install
+pip install pandas pytest
+# optional extras
+pip install pydantic streamlit rich
+
+# run CLI end-to-end (default horizon=7)
+python -m src.cli --data-dir data --out-dir outputs --horizon 7 --execute
+
+# run tests
+pytest -q
+________________________________________
+3) Project Layout
+/core-loop
+  /data/                         # INPUTS (CSV/JSON)
+    bank_txns.csv
+    ar_invoices.csv
+    ap_bills.csv
+    policy.json
+    cutoff_calendar.json
+  /src/
+    __init__.py
+    cli.py                       # orchestration (one-shot run)
+    /core/
+      __init__.py
+      config.py                  # load_settings(data_dir) -> Settings
+      reason_codes.py            # REASONS = {...}
+      parse.py                   # loaders, balance computation
+      predict.py                 # AR/AP horizon flows (expected inflows/outflows)
+      prescribe.py               # policy math, allocation, cutoff/maker-checker
+      perform.py                 # simulated order lifecycle
+      present.py                 # EOD markdown builder
+      models.py                  # (optional) pydantic models
+  /outputs/                      # OUTPUTS
+    summary.json
+    EOD_Summary.md
+    order_{uuid}.json            # if execute & order exists
+  /tests/
+    test_core_loop.py
+  README.md
+  requirements.txt               # minimal pin set
+________________________________________
+4) Data Contracts (Files → Canonical Shapes)
+4.1 bank_txns.csv
+column	type	required	notes
+date	ISO date	yes	posting date (e.g., 2025-08-30)
+description	string	yes	free text
+counterparty_id	string	no	optional (customer/vendor id)
+amount	float	yes	+inflow / –outflow
+running_balance	float	no	if present, last row (by date) is balance
+Balance rule:
+If running_balance exists → current_balance = last(running_balance ordered by date)
+Else → current_balance = sum(amount)
+________________________________________
+4.2 ar_invoices.csv
+column	type	required	notes
+invoice_id	string	yes	unique
+customer_id	string	yes	CUST#
+invoice_date	ISO date	yes	
+due_date	ISO date	yes	
+amount	float	yes	
+status	enum	yes	open | paid
+paid_date	ISO date	no	required if status == "paid"
+________________________________________
+4.3 ap_bills.csv
+column	type	required	notes
+bill_id	string	yes	unique
+vendor_id	string	yes	VEND#
+vendor_tier	enum	yes	critical | regular
+bill_date	ISO date	yes	
+due_date	ISO date	yes	
+amount	float	yes	
+status	enum	yes	open | paid
+paid_date	ISO date	no	required if status == "paid"
+________________________________________
+4.4 policy.json
+{
+  "currency": "INR",
+  "min_operating_cash": 1000000,
+  "payroll_buffer": 400000,
+  "tax_buffer": 200000,
+  "vendor_tier_buffers": { "critical": 300000, "regular": 100000 },
+  "approval_threshold": 500000,
+  "whitelist": [
+    { "instrument": "Liquid_Fund_Overnight", "issuer": "ABC AMC", "max_amount": 5000000, "max_tenor_days": 1 }
+  ],
+  "recognition_ratio_expected_inflows": 0.40,
+  "outflow_shock_multiplier": 1.15,
+  "enforce_cutoff": true,
+  "cutoff_hour_ist": 14
+}
+________________________________________
+4.5 cutoff_calendar.json
+{
+  "timezone": "Asia/Kolkata",
+  "business_days": ["Mon","Tue","Wed","Thu","Fri"],
+  "cutoff_hour_ist": 14,
+  "market_cutoffs": {
+    "Liquid_Fund_Overnight": { "order_cutoff_hour_ist": 14, "settlement_t_plus_days": 0 }
+  },
+  "holidays_2025": ["2025-01-26","2025-08-15","2025-10-02"]
+}
+________________________________________
+5) Reason Codes (Enumerated)
+REASONS = {
+•	FIXED_BUFFERS: applied operating + payroll + tax + vendor tier buffers
+•	OUTFLOW_SHOCK: applied outflow shock multiplier to horizon outflows
+•	CONSERVATIVE_INFLOW: recognized only a fraction of expected inflows pre-settlement
+•	WL_OK: instrument/issuer within whitelist & caps
+•	CUTOFF_PASSED: suppressed order due to market cutoff
+•	MAKER_CHECKER: amount ≥ approval threshold
+•	NO_SURPLUS: deployable ≤ 0
+}
+________________________________________
+6) Module Contracts (Functions & Behavior)
+6.1 config.py
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict
+
+@dataclass
+class Settings:
+    data_dir: Path
+    policy: Dict[str, Any]
+    calendar: Dict[str, Any]
+
+def load_settings(data_dir: str | Path) -> Settings:
+    """
+    Reads policy.json and cutoff_calendar.json from data_dir.
+    Returns structured Settings.
+    """
+________________________________________
+6.2 parse.py
+import pandas as pd
+from pathlib import Path
+
+def load_bank(p: Path) -> pd.DataFrame:
+    """Required cols: date, description, amount. Optional: counterparty_id, running_balance."""
+def load_ar(p: Path) -> pd.DataFrame:
+    """Required cols as per AR schema; parse invoice_date, due_date."""
+def load_ap(p: Path) -> pd.DataFrame:
+    """Required cols as per AP schema; parse bill_date, due_date."""
+def current_balance(bank_df: pd.DataFrame) -> float:
+    """
+    If 'running_balance' exists → last value after sorting by date ascending,
+    else sum of 'amount'.
+    """
+Validation: If required columns are missing → raise ValueError('missing columns: ...').
+________________________________________
+6.3 predict.py
+Heuristic rules
+•	AR collection probability by days_to_due:
+o	< 0: 0.85
+o	<= 7: 0.70
+o	<=14: 0.50
+o	else: 0.30
+•	AP within horizon: 1.0 (certain).
+import pandas as pd
+from datetime import date
+
+def invoice_pay_prob(days_to_due: int, status: str) -> float: ...
+
+def horizon_flows(
+    ar_df: pd.DataFrame,
+    ap_df: pd.DataFrame,
+    horizon_days: int = 7
+) -> tuple[float, float, pd.DataFrame, pd.DataFrame]:
+    """
+    Returns (expected_inflows, expected_outflows, ar_h_df, ap_h_df) for invoices/bills with due_date in [today, today+horizon].
+    ar_h_df includes columns: invoice_id, due_date, amount, prob
+    ap_h_df includes columns: bill_id, due_date, amount, vendor_tier
+    """
+________________________________________
+6.4 prescribe.py
+Policy math
+•	must_keep = min_operating_cash + payroll_buffer + tax_buffer + Σ vendor_tier_buffer(for AP in horizon) + outflow_shock_multiplier * expected_outflows
+•	deployable = max(0, balance + recognition_ratio_expected_inflows * expected_inflows - must_keep)
+Allocation rules
+•	If enforce_cutoff and local time hour ≥ cutoff_hour_ist → no order (reason: CUTOFF_PASSED).
+•	Else choose first whitelist instrument; proposed_amount = min(deployable, whitelist.max_amount).
+•	needs_maker_checker = (proposed_amount >= approval_threshold).
+from typing import List, Dict, Tuple
+
+def must_keep(policy: Dict, expected_outflows: float, ap_rows: list[Dict]) -> float: ...
+def deployable(balance: float, expected_inflows: float, must_keep_amt: float, policy: Dict) -> float:
+    """Use policy['recognition_ratio_expected_inflows']; clamp ≥ 0; round to 2dp."""
+def propose_order(deployable_amt: float, policy: Dict) -> tuple[Dict | None, List[str]]:
+    """
+    Returns (order_dict_or_none, reason_codes)
+    order_dict: { "proposed": float, "instrument": str, "issuer": str, "needs_maker_checker": bool }
+    """
+________________________________________
+6.5 perform.py
+import json, uuid
+from datetime import datetime
+from pathlib import Path
+
+def submit_order_stub(order: dict, out_dir: str | Path) -> dict:
+    """
+    Simulates order lifecycle (submitted -> placed -> settled) and writes to outputs/order_{uuid}.json.
+    Returns final state dict.
+    """
+________________________________________
+6.6 present.py
+from datetime import date
+from typing import List, Dict
+
+def eod_markdown(
+    balance: float, inflows: float, outflows: float, must_keep: float, deployable: float,
+    order: Dict | None, reasons: List[str], horizon_days: int
+) -> str:
+    """
+    Returns Markdown string with KPIs, Proposed Action, Reason Codes.
+    """
+________________________________________
+7) CLI Orchestration (src/cli.py)
+Arguments
+•	--data-dir (default data)
+•	--out-dir (default outputs)
+•	--horizon (int, default 7, range 3..14)
+•	--execute (flag; if present, perform simulated execution when order exists)
+Flow (pseudocode)
+settings = load_settings(args.data_dir)
+bank = load_bank(settings.data_dir)
+ar   = load_ar(settings.data_dir)
+ap   = load_ap(settings.data_dir)
+
+bal = current_balance(bank)
+inflows, outflows, ar_h, ap_h = horizon_flows(ar, ap, args.horizon)
+mk  = must_keep(settings.policy, outflows, ap_h.to_dict(orient="records"))
+dep = deployable(bal, inflows, mk, settings.policy)
+order, reasons = propose_order(dep, settings.policy)
+
+summary = {
+  "balance": bal,
+  "expected_inflows": inflows,
+  "expected_outflows": outflows,
+  "must_keep": mk,
+  "deployable": dep,
+  "order": order,
+  "reasons": reasons,
+  "horizon_days": args.horizon
+}
+write outputs/summary.json
+write outputs/EOD_Summary.md via eod_markdown(...)
+
+if args.execute and order and order["proposed"] > 0:
+    state = submit_order_stub(order, args.out_dir)
+    summary["execution_state"] = state
+    rewrite outputs/summary.json with state included
+print("Wrote outputs to", args.out_dir)
+summary.json example
+{
+  "balance": 2615000.0,
+  "expected_inflows": 820000.0,
+  "expected_outflows": 610000.0,
+  "must_keep": 2015000.0,
+  "deployable": 185000.0,
+  "order": {
+    "proposed": 185000.0,
+    "instrument": "Liquid_Fund_Overnight",
+    "issuer": "ABC AMC",
+    "needs_maker_checker": false
+  },
+  "reasons": ["FIXED_BUFFERS","OUTFLOW_SHOCK","CONSERVATIVE_INFLOW","WL_OK"],
+  "horizon_days": 7
+}
+________________________________________
+8) Determinism, Rounding, Time
+•	Rounding: Monetary outputs (must_keep, deployable, order.proposed) → round to 2 decimals.
+•	Determinism: No randomness. Computation must depend only on file inputs and current local time (for cutoff).
+•	Cutoff time: Use local wall-clock hour; treat cutoff_hour_ist as a simple hour threshold (sufficient for demo).
+________________________________________
+9) Error Handling & Validation
+•	Missing columns → ValueError("missing columns: ...").
+•	Non-numeric amounts → coerce to float or error.
+•	Invalid enums (status, vendor_tier) → ValueError.
+•	Negative deployable → clamp to 0.0; add NO_SURPLUS.
+•	Cutoff suppression → return order=None (or proposed=0), add CUTOFF_PASSED.
+________________________________________
+10) Tests (tests/test_core_loop.py)
+E2E Smoke
+from core.config import load_settings
+from core.parse import load_bank, load_ar, load_ap, current_balance
+from core.predict import horizon_flows
+from core.prescribe import must_keep, deployable, propose_order
+
+def test_end_to_end():
+    settings = load_settings("data")
+    bank = load_bank(settings.data_dir)
+    ar = load_ar(settings.data_dir)
+    ap = load_ap(settings.data_dir)
+
+    bal = current_balance(bank)
+    inflows, outflows, ar_h, ap_h = horizon_flows(ar, ap, 7)
+    mk = must_keep(settings.policy, outflows, ap_h.to_dict(orient="records"))
+    dep = deployable(bal, inflows, mk, settings.policy)
+    order, reasons = propose_order(dep, settings.policy)
+
+    assert bal >= 0 and mk > 0 and dep >= 0
+    assert isinstance(reasons, list)
+________________________________________
+11) Optional Streamlit UI (single file, fast demo)
+•	Show 5 KPIs (Balance, Inflows, Outflows, MustKeep, Deployable)
+•	Proposed order card (+ maker–checker badge)
+•	Expanders with AR/AP rows for the horizon
+•	Buttons: “Generate EOD Summary”, “Simulate Execution”
+(UI is optional; CLI is the authoritative artifact.)
+________________________________________
+12) Implementation Order (Checklist)
+1.	reason_codes.py (constants)
+2.	config.py (load JSONs)
+3.	parse.py (loaders + current_balance)
+4.	predict.py (invoice_pay_prob, horizon_flows)
+5.	prescribe.py (must_keep, deployable, propose_order)
+6.	present.py (eod_markdown)
+7.	perform.py (submit_order_stub)
+8.	cli.py (wire it together)
+9.	tests/test_core_loop.py (E2E smoke)
+Acceptance: Running the CLI produces outputs/summary.json and outputs/EOD_Summary.md reflecting inputs, with correct reason codes and cutoff behavior.
+________________________________________
+13) Notes for Implementation
+•	Keep functions pure where possible; pass in policy parameters; avoid global state.
+•	Keep file I/O isolated (CLI and config.py); keep compute modules pure and testable.
+•	Use only standard data types in JSON artifacts (no numpy types).
+________________________________________
+This spec is designed so Claude can implement the modules, function signatures, CLI, and tests directly without further interpretation. If you want, I can also provide a minimal requirements.txt, pyproject.toml, and empty file stubs with TODOs to accelerate coding.
+

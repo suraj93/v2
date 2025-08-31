@@ -1,0 +1,12 @@
+{
+  "date": "2025-08-31",
+  "deployable_value": 1571106.67,
+  "current_balance": 4800000.0,
+  "must_keep_value": 4074265.94,
+  "safety_buffers": 4074265.94,
+  "description": "Deployable value: INR1.6M from current balance INR4.8M, expected AR INR0.9M, AP INR1.2M, buffer INR4.1M.\nLimited surplus available due to high outflow requirements and conservative buffer maintenance.",
+  "deploy_instrument": "Liquid_Fund_Overnight",
+  "deploy_issuer": "HDFC Liquid Fund",
+  "max_tenor": 1,
+  "approval_needed": true
+}

@@ -1,0 +1,88 @@
+---
+
+# Phase 1 — Spec: Streamlit Scaffold + Core Liquidity KPIs
+
+## Objective
+
+Stand up a **read-only Streamlit app (localhost)** that shows four KPI cards using **existing backend outputs**:
+
+1. **Total Bank Balance**
+2. **Raw AP (Next 7 days)**
+3. **Raw AR (Next 7 days)**
+4. **Today’s Deployable**
+
+> Claude: **do not re-implement any calculations**. Call the **existing JSON endpoints/functions** already in the codebase for “compute today” and “AP/AR 7-day raw totals”.
+
+## Scope (Phase 1 only)
+
+* Streamlit app scaffolding + layout
+* Header with “As of” time (IST), Last Refreshed chip, Refresh button, auto-refresh every 60s
+* Four KPI cards (₹, Lakhs/Crore formatting)
+* No tables/charts yet. No auth. Localhost only.
+
+## Stack & Folders
+
+```
+app/
+  ├─ dashboard.py          # Streamlit entrypoint
+  ├─ data_access.py        # thin adapters to existing code
+  ├─ formatting.py         # INR + time utilities
+  └─ requirements.txt      # streamlit, plotly (optional later), pandas, pytz, python-dateutil, requests
+```
+
+## Data Sources (reuse existing implementations)
+
+* **Compute Today JSON** (already implemented in your code):
+  Claude: **import/call your existing implementation** (or HTTP) to fetch:
+
+  ```json
+  {
+    "asOf": "2025-08-30T10:05:00+05:30",
+    "bankBalance_paise": 0,
+    "rawAP_7d_paise": 0,
+    "rawAR_7d_paise": 0,
+    "mustKeep_paise": 0,
+    "deployable_paise": 0,
+    "reasons": ["...","..."]
+  }
+  ```
+
+  Do not recompute deployable client-side—**display what backend returns**.
+
+## UI Layout
+
+* **Header**: “As of <IST time> · Last refreshed \<HH\:MM IST> · \[Refresh] · Timezone: IST”
+* **KPI strip (4 cards)**: Bank Balance · Raw AP (7d) · Raw AR (7d) · Today’s Deployable
+
+  * Format numbers in **₹ Lakhs/Crore** (e.g., ₹2.6Cr, ₹60L).
+  * Card turns **amber** if deployable < 0.
+
+## Data Access Layer (adapters)
+
+```python
+# data_access.py (Phase 1)
+def get_compute_today() -> dict:
+    """Call existing implementation or HTTP endpoint; return the JSON above."""
+    ...
+```
+
+## Utilities
+
+```python
+# formatting.py
+def fmt_inr_lakh_style(paise: int) -> str: ...
+def to_ist(dt_str_or_dt) -> str: ...
+```
+
+## Auto-refresh
+
+* Use `st_autorefresh(interval=60000, key="auto")` + a manual “Refresh” button that re-calls `get_compute_today()`.
+
+## Acceptance Criteria (Phase 1)
+
+* App runs via `streamlit run app/dashboard.py` on **localhost**.
+* IST time shown correctly; auto-refresh every 60s works.
+* The 4 KPIs exactly mirror backend JSON values (no client math).
+* Numbers are formatted in Lakhs/Crore.
+* No authentication; page loads in <2s.
+

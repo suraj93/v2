@@ -1,0 +1,7 @@
+streamlit
+streamlit-autorefresh
+pandas
+pytz
+python-dateutil
+requests
+plotly>=5.0

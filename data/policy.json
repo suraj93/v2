@@ -1,0 +1,17 @@
+{
+  "currency": "INR",
+  "min_operating_cash": 1000000,
+  "payroll_buffer": 400000,
+  "tax_buffer": 200000,
+  "vendor_tier_buffers": { "critical": 150000, "regular": 50000 },
+  "approval_threshold": 500000,
+  "whitelist": [
+    { "instrument": "Liquid_Fund_Overnight", "issuer": "HDFC Liquid Fund", "max_amount": 5000000, "max_tenor_days": 1 },
+    { "instrument": "Liquid_Fund_Overnight", "issuer": "ICICI Liquid Fund", "max_amount": 5000000, "max_tenor_days": 1 }
+  ],
+  "recognition_ratio_expected_inflows": 0.98,
+  "outflow_shock_multiplier": 1.10,
+  "ap_provision_days": 14,
+  "enforce_cutoff": true,
+  "cutoff_hour_ist": 14
+}

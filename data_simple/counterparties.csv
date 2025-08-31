@@ -1,0 +1,7 @@
+counterparty_id,name,type
+CUST1,Acme Retailers,customer
+CUST2,Nimbus Foods,customer
+CUST3,Sunrise Traders,customer
+VEND1,Bright Logistics,vendor
+VEND2,Delta Packaging,vendor
+VEND3,Northwind Textiles,vendor

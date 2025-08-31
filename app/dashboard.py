@@ -292,7 +292,7 @@ def tab_deployment_approvals():
     st.divider()
     
     # ===== 3. DEPLOYMENT EXPLANATION (3 LINES) =====
-    st.subheader("📝 Deployment Calculation Rationale")
+    st.subheader("📝 Deployment Planning")
     
     deployable = treasury_data.get("deployable_rupees", 0)
     current_balance = treasury_data.get("bankBalance_rupees", 0)
@@ -565,7 +565,7 @@ def main():
     """Main dashboard application with tabs."""
     base_dir = Path(__file__).parent
     add_logo(base_dir / "logo.png", height_px=80, pad_extra_px=-20, remove_st_header_gap=True)
-    st.title("💰 Treasury Dashboard")
+    st.title("🪙 Treasury Dashboard")
     
     # ===== GLOBAL HEADER (outside tabs to avoid duplication) =====
     treasury_data, investment_data, freshness = get_all_data()
